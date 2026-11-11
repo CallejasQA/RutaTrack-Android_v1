@@ -1,0 +1,6 @@
+{
+  "name": "RutaTrack",
+  "description": "Offline GPS route tracker with OpenStreetMap, live tracking, POIs, and Room database.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

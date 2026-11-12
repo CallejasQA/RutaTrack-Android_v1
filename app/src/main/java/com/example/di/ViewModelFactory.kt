@@ -39,7 +39,8 @@ object AppViewModelProvider {
             RouteDetailViewModel(
                 routeId = routeId,
                 getRouteWithPointsUseCase = app.container.getRouteWithPointsUseCase,
-                addPoiUseCase = app.container.addPoiUseCase
+                addPoiUseCase = app.container.addPoiUseCase,
+                exportRouteToGpxUseCase = app.container.exportRouteToGpxUseCase
             )
         }
     }

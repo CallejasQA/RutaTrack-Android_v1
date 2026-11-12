@@ -8,6 +8,7 @@ import com.example.data.repository.RouteRepositoryImpl
 import com.example.domain.repository.RouteRepository
 import com.example.domain.usecase.AddPoiUseCase
 import com.example.domain.usecase.DeleteRouteUseCase
+import com.example.domain.usecase.ExportRouteToGpxUseCase
 import com.example.domain.usecase.GetAllRoutesUseCase
 import com.example.domain.usecase.GetRouteWithPointsUseCase
 import com.example.domain.usecase.SaveRouteUseCase
@@ -25,6 +26,7 @@ interface AppContainer {
     val getRouteWithPointsUseCase: GetRouteWithPointsUseCase
     val addPoiUseCase: AddPoiUseCase
     val deleteRouteUseCase: DeleteRouteUseCase
+    val exportRouteToGpxUseCase: ExportRouteToGpxUseCase
 }
 
 /**
@@ -66,5 +68,9 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val deleteRouteUseCase: DeleteRouteUseCase by lazy {
         DeleteRouteUseCase(routeRepository)
+    }
+
+    override val exportRouteToGpxUseCase: ExportRouteToGpxUseCase by lazy {
+        ExportRouteToGpxUseCase()
     }
 }

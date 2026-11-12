@@ -50,7 +50,7 @@ app/src/main/java/com/example/
 
 1. Clonar el repositorio:
    ```bash
-   git clone https://github.com/CallejasQA/RutaTrack-Android.git
+   git clone https://github.com/CallejasQA/RutaTrack-Android_v1.git
    ```
 2. Abrir el proyecto en **Android Studio** (versión Ladybug / Hedgehog o superior).
 3. Sincronizar Gradle (`Sync Project with Gradle Files`).

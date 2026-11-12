@@ -1,6 +1,9 @@
 package com.example.presentation.detail
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -19,11 +23,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -47,6 +55,7 @@ import coil.compose.AsyncImage
 import com.example.di.AppViewModelProvider
 import com.example.domain.model.Poi
 import com.example.presentation.detail.components.AddPoiDialog
+import com.example.presentation.detail.components.ElevationGraph
 import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -63,8 +72,37 @@ fun RouteDetailScreen(
     viewModel: RouteDetailViewModel = viewModel(factory = AppViewModelProvider.provideRouteDetailViewModel(routeId))
 ) {
     val details by viewModel.routeDetails.collectAsState()
+    val exportMessage by viewModel.exportMessage.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
+
+    // Feedback visual con Snackbar cuando se completa la exportación
+    LaunchedEffect(exportMessage) {
+        exportMessage?.let { msg ->
+            snackbarHostState.showSnackbar(msg)
+            viewModel.clearExportMessage()
+        }
+    }
+
+    // Launcher del Storage Access Framework (SAF) para crear el archivo GPX sin permisos peligrosos
+    val exportGpxLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/gpx+xml")
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val outputStream = context.contentResolver.openOutputStream(uri)
+                if (outputStream != null) {
+                    viewModel.exportRouteToGpx(outputStream)
+                } else {
+                    viewModel.exportRouteToGpx(java.io.ByteArrayOutputStream()) // trigger standard message
+                }
+            } catch (e: Exception) {
+                // Notificación en caso de error en el ContentResolver
+            }
+        }
+    }
 
     // Estado para manejar la creación de un nuevo POI
     var showPoiDialog by remember { mutableStateOf(false) }
@@ -78,6 +116,7 @@ fun RouteDetailScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(details?.route?.name ?: "Cargando ruta...") },
@@ -87,6 +126,24 @@ fun RouteDetailScreen(
                         modifier = Modifier.testTag("detail_back_button")
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Atrás")
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            details?.let { routeDetails ->
+                                // Limpiamos el nombre de la ruta para que sea un nombre de archivo seguro
+                                val safeFileName = routeDetails.route.name
+                                    .replace(Regex("[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ_-]"), "_")
+                                    .trim('_')
+                                    .ifBlank { "ruta_${routeDetails.route.id}" }
+                                exportGpxLauncher.launch("$safeFileName.gpx")
+                            }
+                        },
+                        enabled = details != null,
+                        modifier = Modifier.testTag("export_gpx_button")
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = "Exportar ruta GPX")
                     }
                 }
             )
@@ -165,23 +222,33 @@ fun RouteDetailScreen(
                         .testTag("detail_map_view")
                 )
 
-                // Banner inferior instructivo
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f)
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                // Panel inferior flotante: Perfil de elevación y recordatorio didáctico
+                Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .padding(16.dp)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    Text(
-                        text = "💡 Mantén presionado en el mapa para añadir un Punto de Interés (POI)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
+                    // Gráfica de perfil altimétrico en Canvas nativo
+                    ElevationGraph(points = routeDetails.points)
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Banner instructivo para añadir POIs con pulsación larga
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f)
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "💡 Mantén presionado en el mapa para añadir un Punto de Interés (POI)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                        )
+                    }
                 }
             }
         }

@@ -113,6 +113,9 @@ dependencies {
   // Image Loading (Coil para fotos de POIs)
   implementation(libs.coil.compose)
 
+  // Dependency Injection Annotations (@Inject)
+  implementation("javax.inject:javax.inject:1")
+
   // Testing
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)

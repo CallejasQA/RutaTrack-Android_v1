@@ -5,29 +5,22 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
-import androidx.compose.material.icons.filled.GpsFixed
-import androidx.compose.material.icons.filled.GpsNotFixed
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
@@ -35,7 +28,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -46,10 +38,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -59,24 +49,18 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
 import com.example.di.AppViewModelProvider
-import com.example.domain.model.Poi
-import com.example.presentation.map.components.FollowRouteHudCard
 import com.example.presentation.map.components.SaveRouteDialog
 import com.example.service.TrackingService
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.FolderOverlay
-import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 
 @Composable
 fun MapScreen(
-    followRouteId: Long? = null,
     viewModel: MapViewModel = viewModel(factory = AppViewModelProvider.Factory),
     onNavigateToHistory: () -> Unit = {}
 ) {
@@ -86,59 +70,47 @@ fun MapScreen(
 
     var mapViewInstance by remember { mutableStateOf<MapView?>(null) }
     var locationOverlayInstance by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
-    var renderedFollowRouteKey by remember { mutableStateOf<String?>(null) }
-    var centeredFollowRouteId by remember { mutableStateOf<Long?>(null) }
-    var selectedReferencePoi by remember { mutableStateOf<Poi?>(null) }
-
+    var hasFineLocationPermission by remember {
+        mutableStateOf(hasFineLocationPermission(context))
+    }
     var hasLocationPermission by remember {
         mutableStateOf(hasAnyLocationPermission(context))
     }
+    var hasCenteredOnInitialLocation by remember { mutableStateOf(false) }
 
-    // Overlays persistentes con jerarquía Z estricta:
-    // 0: Huella de referencia (Naranja #FF6D00, grosor 12f)
-    // 1: Polilínea de grabación en vivo (Azul #1E88E5, grosor 14f)
-    // 2: Carpeta de marcadores de referencia (Inicio, Fin y POIs)
-    // 3: MyLocationNewOverlay (añadido al final para quedar siempre por encima de las rutas)
-    val referencePolylineOverlay = remember {
-        Polyline().apply {
-            outlinePaint.color = Color(0xFFFF6D00).toArgb()
-            outlinePaint.strokeWidth = 12f
-        }
-    }
     val livePolylineOverlay = remember {
         Polyline().apply {
             outlinePaint.color = Color(0xFF1E88E5).toArgb()
             outlinePaint.strokeWidth = 14f
         }
     }
-    val referenceMarkersFolder = remember { FolderOverlay() }
 
-    // Cargamos la ruta de referencia si venimos desde Historial / Detalle con followRouteId
-    LaunchedEffect(followRouteId) {
-        if (followRouteId != null && followRouteId > 0L) {
-            viewModel.loadReferenceRoute(followRouteId)
-        }
-    }
-
-    // Permiso exclusivo para habilitar GPS en pantalla en modo "Seguir Huella" (sin iniciar servicio)
-    val followPermissionLauncher = rememberLauncherForActivityResult(
+    // 1. Launcher inicial de permisos de ubicación para activar MyLocationNewOverlay en dispositivo físico
+    val mapLocationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        hasLocationPermission = granted
-        if (granted) {
-            locationOverlayInstance?.enableMyLocation()
-            if (state.followRouteMode.isCameraCenteredOnUser) {
-                locationOverlayInstance?.enableFollowLocation()
+        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        hasFineLocationPermission = fineGranted
+        hasLocationPermission = fineGranted || coarseGranted
+
+        if (fineGranted || coarseGranted) {
+            locationOverlayInstance?.apply {
+                enableMyLocation()
+                enableFollowLocation()
+            }
+            mapViewInstance?.let { map ->
+                centerOnLastKnownLocation(context, map)
+                hasCenteredOnInitialLocation = true
+                map.invalidate()
             }
         }
     }
 
-    // Si activamos Seguir Huella y aún no tenemos permiso GPS, lo solicitamos suavemente
-    LaunchedEffect(state.followRouteMode.isActive) {
-        if (state.followRouteMode.isActive && !hasAnyLocationPermission(context)) {
-            followPermissionLauncher.launch(
+    // Solicitamos permisos al abrir el mapa si aún no están concedidos
+    LaunchedEffect(Unit) {
+        if (!hasAnyLocationPermission(context)) {
+            mapLocationPermissionLauncher.launch(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,
                     Manifest.permission.ACCESS_COARSE_LOCATION
@@ -147,109 +119,50 @@ fun MapScreen(
         }
     }
 
-    // Gestor de permisos para iniciar el Foreground Service de grabación
+    // Reactivamos explícitamente MyLocationNewOverlay cuando el permiso o las instancias estén listas
+    LaunchedEffect(
+        hasFineLocationPermission,
+        hasLocationPermission,
+        locationOverlayInstance,
+        mapViewInstance
+    ) {
+        val overlay = locationOverlayInstance ?: return@LaunchedEffect
+        val mapView = mapViewInstance ?: return@LaunchedEffect
+        if (hasLocationPermission) {
+            overlay.enableMyLocation()
+            overlay.enableFollowLocation()
+            if (!hasCenteredOnInitialLocation) {
+                if (centerOnLastKnownLocation(context, mapView)) {
+                    hasCenteredOnInitialLocation = true
+                }
+            }
+            mapView.invalidate()
+        }
+    }
+
+    // Gestor de permisos al pulsar Iniciar grabación (ubicación + notificaciones Android 13+)
     val trackingPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val isFineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val isCoarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        hasFineLocationPermission = isFineGranted || hasFineLocationPermission(context)
+        hasLocationPermission = isFineGranted || isCoarseGranted
+
         if (isFineGranted || isCoarseGranted) {
-            hasLocationPermission = true
             sendCommandToService(context, "ACTION_START_OR_RESUME_SERVICE")
-            locationOverlayInstance?.enableMyLocation()
-            if (state.followRouteMode.isCameraCenteredOnUser) {
-                locationOverlayInstance?.enableFollowLocation()
+            locationOverlayInstance?.apply {
+                enableMyLocation()
+                enableFollowLocation()
             }
-        }
-    }
-
-    // Sincronizamos el centrado automático de cámara con MyLocationNewOverlay
-    LaunchedEffect(state.followRouteMode.isCameraCenteredOnUser, locationOverlayInstance) {
-        val overlay = locationOverlayInstance ?: return@LaunchedEffect
-        if (state.followRouteMode.isCameraCenteredOnUser) {
-            overlay.enableFollowLocation()
-            overlay.myLocation?.let { geoPoint ->
-                mapViewInstance?.controller?.animateTo(geoPoint)
-            }
-        } else {
-            overlay.disableFollowLocation()
-        }
-    }
-
-    // Centramos una vez al inicio de la huella de referencia recién cargada
-    LaunchedEffect(state.followRouteMode.referenceRoute?.id, state.followRouteMode.referencePoints.size, mapViewInstance) {
-        val mapView = mapViewInstance ?: return@LaunchedEffect
-        val refRoute = state.followRouteMode.referenceRoute
-        val refPoints = state.followRouteMode.referencePoints
-        if (refRoute != null && refPoints.isNotEmpty() && centeredFollowRouteId != refRoute.id) {
-            centeredFollowRouteId = refRoute.id
-            val startGeo = GeoPoint(refPoints.first().latitude, refPoints.first().longitude)
-            // Si aún no hay fijación GPS o cámara no está anclada al usuario, enfocamos el inicio de la ruta
-            if (locationOverlayInstance?.myLocation == null) {
-                mapView.controller.setZoom(16.0)
-                mapView.controller.animateTo(startGeo)
-            }
-        } else if (refRoute == null) {
-            centeredFollowRouteId = null
-        }
-    }
-
-    // Listener GPS 100% Offline (LocationManager.GPS_PROVIDER) independiente del Foreground Service
-    DisposableEffect(lifecycleOwner, hasLocationPermission) {
-        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val gpsListener = object : LocationListener {
-            override fun onLocationChanged(location: Location) {
-                viewModel.updateUserLocation(location.latitude, location.longitude)
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
-            override fun onProviderEnabled(provider: String) {}
-            override fun onProviderDisabled(provider: String) {}
-        }
-
-        fun startOfflineGpsUpdates() {
-            if (!hasAnyLocationPermission(context)) return
-            try {
-                val lastGps = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                if (lastGps != null) {
-                    viewModel.updateUserLocation(lastGps.latitude, lastGps.longitude)
+            mapViewInstance?.let { map ->
+                if (!hasCenteredOnInitialLocation) {
+                    if (centerOnLastKnownLocation(context, map)) {
+                        hasCenteredOnInitialLocation = true
+                    }
                 }
-                if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                    locationManager.requestLocationUpdates(
-                        LocationManager.GPS_PROVIDER,
-                        1500L,
-                        2f,
-                        gpsListener
-                    )
-                }
-            } catch (_: SecurityException) {
+                map.invalidate()
             }
-        }
-
-        fun stopOfflineGpsUpdates() {
-            try {
-                locationManager.removeUpdates(gpsListener)
-            } catch (_: SecurityException) {
-            }
-        }
-
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            startOfflineGpsUpdates()
-        }
-
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> startOfflineGpsUpdates()
-                Lifecycle.Event.ON_PAUSE -> stopOfflineGpsUpdates()
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            stopOfflineGpsUpdates()
         }
     }
 
@@ -268,45 +181,7 @@ fun MapScreen(
                     Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Historial de rutas")
                 }
 
-                // Botón flotante para alternar el centrado automático de cámara (enableFollowLocation / disableFollowLocation)
-                val isCentered = state.followRouteMode.isCameraCenteredOnUser
-                FloatingActionButton(
-                    onClick = {
-                        viewModel.toggleCameraCenteredOnUser()
-                        if (!isCentered) {
-                            locationOverlayInstance?.enableFollowLocation()
-                            locationOverlayInstance?.myLocation?.let { geoPoint ->
-                                mapViewInstance?.controller?.animateTo(geoPoint)
-                            }
-                        } else {
-                            locationOverlayInstance?.disableFollowLocation()
-                        }
-                    },
-                    containerColor = if (isCentered) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    },
-                    contentColor = if (isCentered) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSecondaryContainer
-                    },
-                    modifier = Modifier
-                        .padding(bottom = 12.dp)
-                        .testTag("center_location_button")
-                ) {
-                    Icon(
-                        imageVector = if (isCentered) Icons.Default.GpsFixed else Icons.Default.GpsNotFixed,
-                        contentDescription = if (isCentered) {
-                            "Centrado automático activado"
-                        } else {
-                            "Activar centrado automático"
-                        }
-                    )
-                }
-
-                // Botón principal de Iniciar / Detener grabación (independiente de Seguir Huella)
+                // Botón principal de Iniciar / Detener grabación
                 if (state.isTracking) {
                     FloatingActionButton(
                         onClick = {
@@ -350,7 +225,7 @@ fun MapScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // --- EL PUENTE A OSMDROID (OpenStreetMap Mapnik 100% Offline) ---
+            // --- EL PUENTE A OSMDROID (OpenStreetMap Mapnik 100% Offline, Norte arriba 0f) ---
             AndroidView(
                 factory = { ctx ->
                     MapView(ctx).apply {
@@ -359,32 +234,41 @@ fun MapScreen(
                         isTilesScaledToDpi = true
                         onResume()
 
-                        controller.setZoom(15.5)
-                        controller.setCenter(GeoPoint(40.4168, -3.7038))
+                        controller.setZoom(16.0)
+                        val initialGeo = getBestLastKnownLocation(ctx)?.let {
+                            GeoPoint(it.latitude, it.longitude)
+                        } ?: GeoPoint(40.4168, -3.7038)
+                        controller.setCenter(initialGeo)
 
-                        // Proveedor GPS 100% offline usando LocationManager.GPS_PROVIDER
+                        // 2. Proveedor híbrido (GPS + Red local/Wi-Fi) para respuesta inmediata en interiores y exteriores
                         val gpsProvider = GpsMyLocationProvider(ctx).apply {
                             clearLocationSources()
                             addLocationSource(LocationManager.GPS_PROVIDER)
+                            addLocationSource(LocationManager.NETWORK_PROVIDER)
                             locationUpdateMinTime = 1500L
                             locationUpdateMinDistance = 2f
                         }
 
+                        // 4. Visibilidad en alta densidad: círculo de precisión activo y centrado al primer fix
                         val myLocationOverlay = MyLocationNewOverlay(gpsProvider, this).apply {
-                            enableMyLocation()
-                            if (state.followRouteMode.isCameraCenteredOnUser) {
+                            setDrawAccuracyEnabled(true)
+                            runOnFirstFix {
+                                val fix = myLocation
+                                if (fix != null) {
+                                    post {
+                                        controller.animateTo(fix)
+                                        invalidate()
+                                    }
+                                }
+                            }
+                            if (hasAnyLocationPermission(ctx)) {
+                                enableMyLocation()
                                 enableFollowLocation()
                             }
                         }
 
-                        // Orden Z estricto:
-                        // 1) Polilínea de referencia (Naranja)
-                        // 2) Polilínea de grabación en vivo (Azul)
-                        // 3) Carpeta de marcadores (Inicio, Fin, POIs)
-                        // 4) MyLocationNewOverlay SIEMPRE AL FINAL para dibujarse por encima de las rutas
-                        overlays.add(referencePolylineOverlay)
+                        // 3. Jerarquía de capas protegida: MyLocationNewOverlay siempre al final
                         overlays.add(livePolylineOverlay)
-                        overlays.add(referenceMarkersFolder)
                         overlays.add(myLocationOverlay)
 
                         locationOverlayInstance = myLocationOverlay
@@ -392,70 +276,27 @@ fun MapScreen(
                     }
                 },
                 update = { mapView ->
-                    // A. Actualizar Huella de Referencia (Modo "Seguir Huella")
-                    val followMode = state.followRouteMode
-                    val newKey = if (followMode.isActive) {
-                        "${followMode.referenceRoute?.id}_${followMode.referencePoints.size}_${followMode.referencePois.size}"
-                    } else {
-                        null
+                    // Protección de capas: nunca se usa overlays.clear() y garantizamos
+                    // que myLocationOverlay permanezca al final (por encima de rutas y marcadores)
+                    if (!mapView.overlays.contains(livePolylineOverlay)) {
+                        mapView.overlays.add(0, livePolylineOverlay)
                     }
 
-                    if (newKey != renderedFollowRouteKey) {
-                        renderedFollowRouteKey = newKey
-                        referenceMarkersFolder.items.clear()
-
-                        if (followMode.isActive) {
-                            val refGeoPoints = followMode.referencePoints.map {
-                                GeoPoint(it.latitude, it.longitude)
-                            }
-                            referencePolylineOverlay.setPoints(refGeoPoints)
-
-                            // Marcador de Inicio
-                            val startMarker = Marker(mapView).apply {
-                                position = refGeoPoints.first()
-                                title = "Inicio: ${followMode.referenceRoute?.name.orEmpty()}"
-                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                            }
-                            referenceMarkersFolder.add(startMarker)
-
-                            // Marcador de Fin (si hay más de 1 punto)
-                            if (refGeoPoints.size > 1) {
-                                val endMarker = Marker(mapView).apply {
-                                    position = refGeoPoints.last()
-                                    title = "Fin de ruta"
-                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                                }
-                                referenceMarkersFolder.add(endMarker)
-                            }
-
-                            // Marcadores de POIs de la huella
-                            followMode.referencePois.forEach { poi ->
-                                val poiMarker = Marker(mapView).apply {
-                                    position = GeoPoint(poi.latitude, poi.longitude)
-                                    title = poi.title
-                                    snippet = poi.description
-                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                                    setOnMarkerClickListener { _, _ ->
-                                        selectedReferencePoi = poi
-                                        true
-                                    }
-                                }
-                                referenceMarkersFolder.add(poiMarker)
-                            }
-                        } else {
-                            referencePolylineOverlay.setPoints(emptyList())
-                        }
-                    }
-
-                    // B. Actualizar Trazado en Vivo (Grabación activa)
                     if (state.currentPath.isNotEmpty()) {
                         val liveGeoPoints = state.currentPath.map { GeoPoint(it.latitude, it.longitude) }
                         livePolylineOverlay.setPoints(liveGeoPoints)
-                        if (state.followRouteMode.isCameraCenteredOnUser) {
-                            mapView.controller.animateTo(liveGeoPoints.last())
-                        }
+                        mapView.controller.animateTo(liveGeoPoints.last())
                     } else {
                         livePolylineOverlay.setPoints(emptyList())
+                    }
+
+                    locationOverlayInstance?.let { myLocOverlay ->
+                        if (!mapView.overlays.contains(myLocOverlay)) {
+                            mapView.overlays.add(myLocOverlay)
+                        } else if (mapView.overlays.lastOrNull() !== myLocOverlay) {
+                            mapView.overlays.remove(myLocOverlay)
+                            mapView.overlays.add(myLocOverlay)
+                        }
                     }
 
                     mapView.invalidate()
@@ -465,94 +306,44 @@ fun MapScreen(
                     .testTag("osmdroid_map_view")
             )
 
-            // HUD superior apilado: Modo "Seguir Huella" y/o Telemetría de Grabación
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 12.dp)
-            ) {
-                if (state.followRouteMode.isActive) {
-                    FollowRouteHudCard(
-                        followMode = state.followRouteMode,
-                        onExitClick = { viewModel.exitFollowRouteMode() }
-                    )
-                }
-
-                if (state.isTracking) {
-                    Card(
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                        modifier = Modifier.testTag("telemetry_banner")
+            // Banner de telemetría cuando se está grabando un recorrido
+            if (state.isTracking) {
+                Card(
+                    shape = RoundedCornerShape(24.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 16.dp)
+                        .testTag("telemetry_banner")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                        ) {
-                            Text(
-                                text = "🔴 Grabando",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Text(
-                                text = "${String.format("%.1f", state.liveDistanceMeters)} m",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "(${state.currentPath.size} pts)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Modal para inspeccionar un POI de la huella de referencia
-    selectedReferencePoi?.let { poi ->
-        AlertDialog(
-            onDismissRequest = { selectedReferencePoi = null },
-            title = { Text(text = poi.title, style = MaterialTheme.typography.titleLarge) },
-            text = {
-                Column {
-                    if (poi.description.isNotBlank()) {
-                        Text(text = poi.description, style = MaterialTheme.typography.bodyMedium)
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-                    if (!poi.imageUri.isNullOrBlank()) {
-                        AsyncImage(
-                            model = poi.imageUri,
-                            contentDescription = poi.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                        )
-                    } else {
                         Text(
-                            text = "Sin fotografía adjunta.",
+                            text = "🔴 Grabando",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = "${String.format("%.1f", state.liveDistanceMeters)} m",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "(${state.currentPath.size} pts)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { selectedReferencePoi = null }) {
-                    Text("Cerrar")
-                }
             }
-        )
+        }
     }
 
     // Modal de finalización de recorrido grabado
@@ -565,14 +356,20 @@ fun MapScreen(
         )
     }
 
-    // Manejo de ciclo de vida del MapView de Osmdroid
+    // 1. Vinculación estricta de MapView y MyLocationNewOverlay al ciclo de vida de Compose
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> {
+                    val fineNow = hasFineLocationPermission(context)
+                    val anyNow = hasAnyLocationPermission(context)
+                    hasFineLocationPermission = fineNow
+                    hasLocationPermission = anyNow
+
                     mapViewInstance?.onResume()
-                    if (hasAnyLocationPermission(context)) {
+                    if (anyNow) {
                         locationOverlayInstance?.enableMyLocation()
+                        mapViewInstance?.invalidate()
                     }
                 }
                 Lifecycle.Event.ON_PAUSE -> {
@@ -592,16 +389,52 @@ fun MapScreen(
     }
 }
 
-private fun hasAnyLocationPermission(context: Context): Boolean {
-    val fine = ContextCompat.checkSelfPermission(
+private fun hasFineLocationPermission(context: Context): Boolean {
+    return ContextCompat.checkSelfPermission(
         context,
         Manifest.permission.ACCESS_FINE_LOCATION
     ) == PackageManager.PERMISSION_GRANTED
+}
+
+private fun hasAnyLocationPermission(context: Context): Boolean {
+    val fine = hasFineLocationPermission(context)
     val coarse = ContextCompat.checkSelfPermission(
         context,
         Manifest.permission.ACCESS_COARSE_LOCATION
     ) == PackageManager.PERMISSION_GRANTED
     return fine || coarse
+}
+
+/**
+ * Consulta la última ubicación conocida en caché del dispositivo (GPS o Red local)
+ * para centrar el mapa al instante mientras llega el primer fix en vivo.
+ */
+private fun getBestLastKnownLocation(context: Context): Location? {
+    if (!hasAnyLocationPermission(context)) return null
+    val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        ?: return null
+
+    val candidates = mutableListOf<Location>()
+    try {
+        if (hasFineLocationPermission(context)) {
+            locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let {
+                candidates.add(it)
+            }
+        }
+        locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)?.let {
+            candidates.add(it)
+        }
+    } catch (_: SecurityException) {
+        return null
+    }
+    return candidates.maxByOrNull { it.time }
+}
+
+private fun centerOnLastKnownLocation(context: Context, mapView: MapView): Boolean {
+    val lastKnown = getBestLastKnownLocation(context) ?: return false
+    mapView.controller.setZoom(16.0)
+    mapView.controller.setCenter(GeoPoint(lastKnown.latitude, lastKnown.longitude))
+    return true
 }
 
 // Función auxiliar para enviar comandos al Foreground Service

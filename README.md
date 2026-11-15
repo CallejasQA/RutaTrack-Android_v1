@@ -14,6 +14,9 @@ Todo el funcionamiento es **100% offline y sin costos**, sin depender de Google 
 - **Persistencia Local con Room (SQLite):** Guardado de rutas finalizadas con métricas de distancia, duración y marcas de tiempo.
 - **Puntos de Interés (POIs) Multimedia:** Posibilidad de fijar marcadores en el mapa con título, descripción y fotos seleccionadas mediante el Photo Picker nativo (`PickVisualMedia`) con permisos persistentes de URI (`takePersistableUriPermission`).
 - **Historial de Rutas:** Consulta de trayectos anteriores con eliminación en cascada de puntos y POIs asociados.
+- **Exportación GPX 1.1 (SAF):** Exporta recorridos y waypoints a formato GPX estándar compatible con Strava, Garmin Connect y Google Earth mediante Storage Access Framework.
+- **Importación GPX 1.1 y KML 2.2:** Parser XML nativo (`XmlPullParser`) con normalización regional, cálculo automático de distancia (Haversine) y desnivel, e inserción atómica con `@Transaction` en Room.
+- **Perfil de Elevación en Canvas Nativo:** Gráfica altimétrica renderizada en GPU mediante `Path` vectorial y degradado dinámico, sin librerías externas.
 
 ---
 

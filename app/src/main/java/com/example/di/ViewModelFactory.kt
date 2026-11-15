@@ -20,8 +20,7 @@ object AppViewModelProvider {
         initializer {
             val app = this.application()
             MapViewModel(
-                saveRouteUseCase = app.container.saveRouteUseCase,
-                getRouteWithPointsUseCase = app.container.getRouteWithPointsUseCase
+                saveRouteUseCase = app.container.saveRouteUseCase
             )
         }
         initializer {

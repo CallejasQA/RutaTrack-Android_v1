@@ -14,10 +14,22 @@ import com.example.presentation.map.MapScreen
 fun AppNavigation(navController: NavHostController) {
     NavHost(
         navController = navController,
-        startDestination = Screen.Map.route
+        startDestination = Screen.Map.createRoute()
     ) {
-        composable(route = Screen.Map.route) {
+        composable(
+            route = Screen.Map.route,
+            arguments = listOf(
+                navArgument("followRouteId") {
+                    type = NavType.LongType
+                    defaultValue = -1L
+                }
+            )
+        ) { backStackEntry ->
+            val rawRouteId = backStackEntry.arguments?.getLong("followRouteId") ?: -1L
+            val followRouteId = rawRouteId.takeIf { it > 0L }
+
             MapScreen(
+                followRouteId = followRouteId,
                 onNavigateToHistory = {
                     navController.navigate(Screen.History.route)
                 }

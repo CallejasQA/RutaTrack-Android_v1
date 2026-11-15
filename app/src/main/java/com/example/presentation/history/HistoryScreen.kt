@@ -237,6 +237,14 @@ fun HistoryScreen(
                             onClick = {
                                 navController.navigate(Screen.RouteDetail.createRoute(route.id))
                             },
+                            onFollowClick = {
+                                navController.navigate(Screen.Map.createRoute(followRouteId = route.id)) {
+                                    popUpTo(navController.graph.startDestinationId) {
+                                        inclusive = true
+                                    }
+                                    launchSingleTop = true
+                                }
+                            },
                             onDeleteClick = {
                                 viewModel.deleteRoute(route.id)
                             }

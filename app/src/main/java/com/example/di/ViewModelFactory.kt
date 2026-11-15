@@ -19,7 +19,10 @@ object AppViewModelProvider {
     val Factory: ViewModelProvider.Factory = viewModelFactory {
         initializer {
             val app = this.application()
-            MapViewModel(saveRouteUseCase = app.container.saveRouteUseCase)
+            MapViewModel(
+                saveRouteUseCase = app.container.saveRouteUseCase,
+                getRouteWithPointsUseCase = app.container.getRouteWithPointsUseCase
+            )
         }
         initializer {
             val app = this.application()

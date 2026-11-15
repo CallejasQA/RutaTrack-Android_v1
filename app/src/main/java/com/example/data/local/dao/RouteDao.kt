@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.example.data.local.entity.PoiEntity
 import com.example.data.local.entity.RouteEntity
 import com.example.data.local.entity.RoutePointEntity
@@ -36,6 +37,30 @@ interface RouteDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPoi(poi: PoiEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertPois(pois: List<PoiEntity>) // Inserción masiva de POIs
+
+    /**
+     * Inserta atómicamente una ruta importada junto con todos sus puntos y POIs.
+     * Si ocurre cualquier error en las inserciones hijas, Room revierte la transacción
+     * completa (Rollback) para evitar rutas vacías o corruptas.
+     */
+    @Transaction
+    suspend fun insertRouteWithDetails(
+        route: RouteEntity,
+        points: List<RoutePointEntity>,
+        pois: List<PoiEntity>
+    ): Long {
+        val generatedRouteId = insertRoute(route)
+        if (points.isNotEmpty()) {
+            insertRoutePoints(points.map { it.copy(routeId = generatedRouteId) })
+        }
+        if (pois.isNotEmpty()) {
+            insertPois(pois.map { it.copy(routeId = generatedRouteId) })
+        }
+        return generatedRouteId
+    }
 
     @Query("DELETE FROM routes WHERE id = :routeId")
     suspend fun deleteRoute(routeId: Long)

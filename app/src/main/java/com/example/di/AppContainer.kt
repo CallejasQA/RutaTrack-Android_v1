@@ -2,6 +2,7 @@ package com.example.di
 
 import android.content.Context
 import androidx.room.Room
+import com.example.data.importer.RouteFileImporter
 import com.example.data.local.dao.RouteDao
 import com.example.data.local.database.AppDatabase
 import com.example.data.repository.RouteRepositoryImpl
@@ -11,6 +12,7 @@ import com.example.domain.usecase.DeleteRouteUseCase
 import com.example.domain.usecase.ExportRouteToGpxUseCase
 import com.example.domain.usecase.GetAllRoutesUseCase
 import com.example.domain.usecase.GetRouteWithPointsUseCase
+import com.example.domain.usecase.ImportRouteUseCase
 import com.example.domain.usecase.SaveRouteUseCase
 
 /**
@@ -27,6 +29,7 @@ interface AppContainer {
     val addPoiUseCase: AddPoiUseCase
     val deleteRouteUseCase: DeleteRouteUseCase
     val exportRouteToGpxUseCase: ExportRouteToGpxUseCase
+    val importRouteUseCase: ImportRouteUseCase
 }
 
 /**
@@ -46,8 +49,12 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
         database.routeDao()
     }
 
+    private val routeFileImporter: RouteFileImporter by lazy {
+        RouteFileImporter()
+    }
+
     override val routeRepository: RouteRepository by lazy {
-        RouteRepositoryImpl(routeDao)
+        RouteRepositoryImpl(routeDao, routeFileImporter)
     }
 
     override val saveRouteUseCase: SaveRouteUseCase by lazy {
@@ -72,5 +79,9 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val exportRouteToGpxUseCase: ExportRouteToGpxUseCase by lazy {
         ExportRouteToGpxUseCase()
+    }
+
+    override val importRouteUseCase: ImportRouteUseCase by lazy {
+        ImportRouteUseCase(routeRepository)
     }
 }

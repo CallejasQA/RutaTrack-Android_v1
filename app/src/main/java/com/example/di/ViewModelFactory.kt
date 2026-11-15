@@ -25,7 +25,8 @@ object AppViewModelProvider {
             val app = this.application()
             HistoryViewModel(
                 getAllRoutesUseCase = app.container.getAllRoutesUseCase,
-                deleteRouteUseCase = app.container.deleteRouteUseCase
+                deleteRouteUseCase = app.container.deleteRouteUseCase,
+                importRouteUseCase = app.container.importRouteUseCase
             )
         }
     }

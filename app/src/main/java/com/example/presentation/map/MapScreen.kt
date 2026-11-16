@@ -4,6 +4,10 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
 import android.location.Location
 import android.location.LocationManager
 import android.os.Build
@@ -249,8 +253,13 @@ fun MapScreen(
                             locationUpdateMinDistance = 2f
                         }
 
-                        // 4. Visibilidad en alta densidad: círculo de precisión activo y centrado al primer fix
+                        // 4. Puntero azul llamativo de alto contraste + círculo de precisión y centrado al primer fix
                         val myLocationOverlay = MyLocationNewOverlay(gpsProvider, this).apply {
+                            val blueDot = createBlueLocationMarkerBitmap(ctx)
+                            val blueArrow = createBlueDirectionArrowBitmap(ctx)
+                            setDirectionArrow(blueDot, blueArrow)
+                            setPersonAnchor(0.5f, 0.5f)
+                            setDirectionAnchor(0.5f, 0.5f)
                             setDrawAccuracyEnabled(true)
                             runOnFirstFix {
                                 val fix = myLocation
@@ -443,4 +452,80 @@ private fun sendCommandToService(context: Context, action: String) {
         this.action = action
     }
     context.startService(intent)
+}
+
+/**
+ * Genera un puntero circular azul eléctrico con halo translúcido y borde blanco
+ * para destacar sobre cualquier fondo claro u oscuro de OpenStreetMap.
+ */
+private fun createBlueLocationMarkerBitmap(context: Context): Bitmap {
+    val density = context.resources.displayMetrics.density.coerceAtLeast(1f)
+    val sizePx = (32f * density).toInt().coerceAtLeast(32)
+    val center = sizePx / 2f
+
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+
+    // Halo exterior azul suave
+    val haloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0x4D1E88E5.toInt()
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(center, center, center * 0.92f, haloPaint)
+
+    // Borde blanco nítido para máximo contraste
+    val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt()
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(center, center, center * 0.58f, borderPaint)
+
+    // Núcleo azul eléctrico llamativo
+    val corePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF0066FF.toInt()
+        style = Paint.Style.FILL
+    }
+    canvas.drawCircle(center, center, center * 0.42f, corePaint)
+
+    return bitmap
+}
+
+/**
+ * Genera una flecha direccional azul eléctrico con contorno blanco para navegación en movimiento.
+ */
+private fun createBlueDirectionArrowBitmap(context: Context): Bitmap {
+    val density = context.resources.displayMetrics.density.coerceAtLeast(1f)
+    val sizePx = (36f * density).toInt().coerceAtLeast(36)
+    val w = sizePx.toFloat()
+    val h = sizePx.toFloat()
+
+    val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+
+    val arrowPath = Path().apply {
+        moveTo(w * 0.50f, h * 0.10f) // Punta superior
+        lineTo(w * 0.85f, h * 0.86f) // Esquina inferior derecha
+        lineTo(w * 0.50f, h * 0.68f) // Muesca central inferior
+        lineTo(w * 0.15f, h * 0.86f) // Esquina inferior izquierda
+        close()
+    }
+
+    // Contorno blanco grueso para contraste
+    val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFFFFFFFF.toInt()
+        style = Paint.Style.STROKE
+        strokeWidth = 3.5f * density
+        strokeJoin = Paint.Join.ROUND
+        strokeCap = Paint.Cap.ROUND
+    }
+    canvas.drawPath(arrowPath, strokePaint)
+
+    // Relleno azul eléctrico llamativo
+    val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF0066FF.toInt()
+        style = Paint.Style.FILL
+    }
+    canvas.drawPath(arrowPath, fillPaint)
+
+    return bitmap
 }

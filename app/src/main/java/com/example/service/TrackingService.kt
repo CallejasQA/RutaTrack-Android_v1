@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
@@ -87,6 +88,7 @@ class TrackingService : Service() {
             .setAutoCancel(false)
             .setOngoing(true) // No se puede deslizar para borrar
             .setSmallIcon(R.mipmap.ic_launcher) // Tu ícono
+            .setLargeIcon(BitmapFactory.decodeResource(resources, R.drawable.rutatrack_logo))
             .setContentTitle("Grabando ruta")
             .setContentText("Tu recorrido se está registrando en segundo plano.")
             .setContentIntent(pendingIntent)

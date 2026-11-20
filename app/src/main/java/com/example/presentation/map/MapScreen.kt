@@ -54,7 +54,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.di.AppViewModelProvider
+import com.example.presentation.map.components.BackgroundLocationRationaleDialog
+import com.example.presentation.map.components.BatteryOptimizationBanner
 import com.example.presentation.map.components.SaveRouteDialog
+import com.example.presentation.map.components.hasBackgroundLocationPermission
+import com.example.presentation.map.components.isBatteryOptimizationIgnored
+import com.example.presentation.map.components.requestIgnoreBatteryOptimizations
 import com.example.service.TrackingService
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -81,6 +86,12 @@ fun MapScreen(
         mutableStateOf(hasAnyLocationPermission(context))
     }
     var hasCenteredOnInitialLocation by remember { mutableStateOf(false) }
+
+    // Estados para resiliencia en recorridos largos (Permiso permanente + Batería)
+    var isBatteryIgnored by remember { mutableStateOf(isBatteryOptimizationIgnored(context)) }
+    var dismissedBatteryBanner by remember { mutableStateOf(false) }
+    var showBackgroundLocationDialog by remember { mutableStateOf(false) }
+    var hasAskedBackgroundThisSession by remember { mutableStateOf(false) }
 
     val livePolylineOverlay = remember {
         Polyline().apply {
@@ -144,28 +155,48 @@ fun MapScreen(
         }
     }
 
-    // Gestor de permisos al pulsar Iniciar grabación (ubicación + notificaciones Android 13+)
+    val startActiveTracking: () -> Unit = {
+        sendCommandToService(context, TrackingService.ACTION_START_OR_RESUME)
+        locationOverlayInstance?.apply {
+            enableMyLocation()
+            enableFollowLocation()
+        }
+        mapViewInstance?.let { map ->
+            if (!hasCenteredOnInitialLocation) {
+                if (centerOnLastKnownLocation(context, map)) {
+                    hasCenteredOnInitialLocation = true
+                }
+            }
+            map.invalidate()
+        }
+    }
+
+    // Paso 2 del flujo escalonado: Solicitud de ubicación permanente ("Permitir todo el tiempo")
+    val backgroundLocationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        // Sea concedida o en modo "Mientras se usa", iniciamos el Foreground Service de inmediato
+        startActiveTracking()
+    }
+
+    // Paso 1 del flujo escalonado: Ubicación en primer plano + notificaciones (Android 13+)
     val trackingPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val isFineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
         val isCoarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         hasFineLocationPermission = isFineGranted || hasFineLocationPermission(context)
-        hasLocationPermission = isFineGranted || isCoarseGranted
+        hasLocationPermission = isFineGranted || isCoarseGranted || hasAnyLocationPermission(context)
 
         if (isFineGranted || isCoarseGranted) {
-            sendCommandToService(context, "ACTION_START_OR_RESUME_SERVICE")
-            locationOverlayInstance?.apply {
-                enableMyLocation()
-                enableFollowLocation()
-            }
-            mapViewInstance?.let { map ->
-                if (!hasCenteredOnInitialLocation) {
-                    if (centerOnLastKnownLocation(context, map)) {
-                        hasCenteredOnInitialLocation = true
-                    }
-                }
-                map.invalidate()
+            val needsBackgroundPrompt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                !hasBackgroundLocationPermission(context) &&
+                !hasAskedBackgroundThisSession
+
+            if (needsBackgroundPrompt) {
+                showBackgroundLocationDialog = true
+            } else {
+                startActiveTracking()
             }
         }
     }
@@ -189,7 +220,7 @@ fun MapScreen(
                 if (state.isTracking) {
                     FloatingActionButton(
                         onClick = {
-                            sendCommandToService(context, "ACTION_STOP_SERVICE")
+                            sendCommandToService(context, TrackingService.ACTION_STOP)
                             viewModel.onToggleSaveDialog(true)
                         },
                         containerColor = MaterialTheme.colorScheme.error,
@@ -351,8 +382,37 @@ fun MapScreen(
                         )
                     }
                 }
+            } else if (!isBatteryIgnored && !dismissedBatteryBanner) {
+                // Aviso discreto para exención de optimización de batería en rutas largas
+                BatteryOptimizationBanner(
+                    onOptimizeClick = { requestIgnoreBatteryOptimizations(context) },
+                    onDismiss = { dismissedBatteryBanner = true },
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 12.dp)
+                )
             }
         }
+    }
+
+    // Diálogo explicativo para ubicación permanente (Paso 2 de Android 11+/Google Play)
+    if (showBackgroundLocationDialog) {
+        BackgroundLocationRationaleDialog(
+            onGrantClick = {
+                showBackgroundLocationDialog = false
+                hasAskedBackgroundThisSession = true
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                } else {
+                    startActiveTracking()
+                }
+            },
+            onContinueForegroundOnly = {
+                showBackgroundLocationDialog = false
+                hasAskedBackgroundThisSession = true
+                startActiveTracking()
+            }
+        )
     }
 
     // Modal de finalización de recorrido grabado
@@ -374,6 +434,7 @@ fun MapScreen(
                     val anyNow = hasAnyLocationPermission(context)
                     hasFineLocationPermission = fineNow
                     hasLocationPermission = anyNow
+                    isBatteryIgnored = isBatteryOptimizationIgnored(context)
 
                     mapViewInstance?.onResume()
                     if (anyNow) {
@@ -451,7 +512,11 @@ private fun sendCommandToService(context: Context, action: String) {
     val intent = Intent(context, TrackingService::class.java).apply {
         this.action = action
     }
-    context.startService(intent)
+    if (action == TrackingService.ACTION_START_OR_RESUME) {
+        ContextCompat.startForegroundService(context, intent)
+    } else {
+        context.startService(intent)
+    }
 }
 
 /**

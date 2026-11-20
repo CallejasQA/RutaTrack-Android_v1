@@ -65,7 +65,7 @@ class MapLocationOverlayTest {
         val db = Room.inMemoryDatabaseBuilder(app, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        val repo = RouteRepositoryImpl(db.routeDao(), RouteFileImporter())
+        val repo = RouteRepositoryImpl(db.routeDao(), db.poiDao(), RouteFileImporter())
         val viewModel = MapViewModel(saveRouteUseCase = SaveRouteUseCase(repo))
 
         try {

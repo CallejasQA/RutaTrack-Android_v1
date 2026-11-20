@@ -12,10 +12,14 @@ interface RouteRepository {
     // Lectura reactiva (Flow)
     fun getAllRoutes(): Flow<List<Route>>
     fun getRouteWithDetails(routeId: Long): Flow<RouteWithDetails>
+    fun getPoisByRouteId(routeId: Long): Flow<List<Poi>>
 
     // Escritura (Suspend functions porque bloquean, deben ir en corrutinas)
+    suspend fun createDraftRoute(name: String): Long
+    suspend fun finalizeRoute(route: Route, points: List<RoutePoint>)
     suspend fun saveRoute(route: Route, points: List<RoutePoint>): Long
     suspend fun addPoi(poi: Poi): Long
+    suspend fun deletePoiById(poiId: Long)
     suspend fun deleteRoute(routeId: Long)
 
     // Importación atómica desde GPX / KML

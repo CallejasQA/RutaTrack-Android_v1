@@ -52,6 +52,7 @@ class TrackingService : Service() {
 
     private val prefs by lazy { getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
     private val draftFile by lazy { File(filesDir, DRAFT_FILE_NAME) }
+    private val trackPointFilter = TrackPointFilter()
 
     private val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000L)
         .setMinUpdateIntervalMillis(2000L)
@@ -61,6 +62,11 @@ class TrackingService : Service() {
         override fun onLocationResult(result: LocationResult) {
             super.onLocationResult(result)
             result.lastLocation?.let { location ->
+                // Filtro Anti-GPS Drift: solo propagamos y guardamos puntos de movimiento real
+                if (!trackPointFilter.shouldAccept(location)) {
+                    return@let
+                }
+
                 val point = RoutePoint(
                     latitude = location.latitude,
                     longitude = location.longitude,
@@ -83,6 +89,7 @@ class TrackingService : Service() {
         when (intent?.action) {
             ACTION_START_OR_RESUME -> {
                 if (!TrackingState.isTracking.value) {
+                    trackPointFilter.reset()
                     clearDraftFile()
                     startTrackingSession()
                 }
@@ -199,6 +206,7 @@ class TrackingService : Service() {
         TrackingState.setIsTracking(false)
         notificationUpdateJob?.cancel()
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        trackPointFilter.reset()
         releaseWakeLock()
         clearDraftFile()
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -257,6 +265,8 @@ class TrackingService : Service() {
             }
             if (restored.isNotEmpty()) {
                 TrackingState.restorePoints(restored, restored.first().timestamp)
+                val last = restored.last()
+                trackPointFilter.seedLastSavedPoint(last.latitude, last.longitude)
             }
         } catch (_: Exception) {
         }

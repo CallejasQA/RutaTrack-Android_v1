@@ -1,7 +1,9 @@
 package com.example.data.repository
 
 import com.example.data.importer.RouteFileImporter
+import com.example.data.local.dao.PoiDao
 import com.example.data.local.dao.RouteDao
+import com.example.data.local.entity.RouteEntity
 import com.example.data.local.mapper.toDomain
 import com.example.data.local.mapper.toEntity
 import com.example.domain.model.ImportedRouteSummary
@@ -18,22 +20,21 @@ import javax.inject.Inject
 
 class RouteRepositoryImpl @Inject constructor(
     private val dao: RouteDao,
+    private val poiDao: PoiDao,
     private val importer: RouteFileImporter = RouteFileImporter()
 ) : RouteRepository {
 
     override fun getAllRoutes(): Flow<List<Route>> {
-        // Transformamos el Flow de Room (Entity) a un Flow de Dominio
         return dao.getAllRoutes().map { entities ->
             entities.map { it.toDomain() }
         }
     }
 
     override fun getRouteWithDetails(routeId: Long): Flow<RouteWithDetails> {
-        // La magia reactiva: Combinamos los 3 flujos de la base de datos
         return combine(
             dao.getRouteById(routeId),
             dao.getRoutePoints(routeId),
-            dao.getRoutePois(routeId)
+            poiDao.getPoisByRouteId(routeId)
         ) { routeEntity, pointsEntities, poisEntities ->
             RouteWithDetails(
                 route = routeEntity.toDomain(),
@@ -43,26 +44,44 @@ class RouteRepositoryImpl @Inject constructor(
         }
     }
 
+    override fun getPoisByRouteId(routeId: Long): Flow<List<Poi>> {
+        return poiDao.getPoisByRouteId(routeId).map { entities ->
+            entities.map { it.toDomain() }
+        }
+    }
+
+    override suspend fun createDraftRoute(name: String): Long {
+        val draft = RouteEntity(
+            name = name,
+            timestamp = System.currentTimeMillis(),
+            distanceMeters = 0f,
+            durationMillis = 0L
+        )
+        return dao.insertRoute(draft)
+    }
+
+    override suspend fun finalizeRoute(route: Route, points: List<RoutePoint>) {
+        val pointEntities = points.map { it.toEntity(routeId = route.id) }
+        dao.finalizeRouteWithPoints(route.toEntity(), pointEntities)
+    }
+
     override suspend fun saveRoute(route: Route, points: List<RoutePoint>): Long {
-        // 1. Insertamos la ruta y obtenemos el ID autogenerado por SQLite
         val insertedRouteId = dao.insertRoute(route.toEntity())
-        
-        // 2. Mapeamos los puntos al modelo Entity inyectándoles el nuevo RouteId
         val pointEntities = points.map { it.toEntity(routeId = insertedRouteId) }
-        
-        // 3. Inserción masiva optimizada
         dao.insertRoutePoints(pointEntities)
-        
-        return insertedRouteId // Devolvemos el ID por si la UI quiere navegar a la pantalla de detalles
+        return insertedRouteId
     }
 
     override suspend fun addPoi(poi: Poi): Long {
-        return dao.insertPoi(poi.toEntity())
+        return poiDao.insertPoi(poi.toEntity())
+    }
+
+    override suspend fun deletePoiById(poiId: Long) {
+        poiDao.deletePoiById(poiId)
     }
 
     override suspend fun deleteRoute(routeId: Long) {
         dao.deleteRoute(routeId)
-        // Recordatorio: Los puntos y POIs se borran solos gracias al CASCADE en Room.
     }
 
     override suspend fun importRoute(
@@ -75,7 +94,6 @@ class RouteRepositoryImpl @Inject constructor(
             val pointEntities = details.points.map { it.toEntity(routeId = 0L) }
             val poiEntities = details.pois.map { it.toEntity() }
 
-            // Persistencia atómica con @Transaction en Room
             val generatedRouteId = dao.insertRouteWithDetails(
                 route = routeEntity,
                 points = pointEntities,

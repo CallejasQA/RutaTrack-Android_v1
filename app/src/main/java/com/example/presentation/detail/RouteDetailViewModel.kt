@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.domain.model.Poi
 import com.example.domain.model.RouteWithDetails
 import com.example.domain.usecase.AddPoiUseCase
+import com.example.domain.usecase.DeletePoiUseCase
 import com.example.domain.usecase.ExportRouteToGpxUseCase
 import com.example.domain.usecase.GetRouteWithPointsUseCase
 import kotlinx.coroutines.Dispatchers
@@ -21,10 +22,10 @@ class RouteDetailViewModel @Inject constructor(
     private val routeId: Long,
     getRouteWithPointsUseCase: GetRouteWithPointsUseCase,
     private val addPoiUseCase: AddPoiUseCase,
+    private val deletePoiUseCase: DeletePoiUseCase,
     private val exportRouteToGpxUseCase: ExportRouteToGpxUseCase
 ) : ViewModel() {
 
-    // Obtenemos la ruta, sus puntos y sus POIs en tiempo real
     val routeDetails: StateFlow<RouteWithDetails?> = getRouteWithPointsUseCase(routeId)
         .stateIn(
             scope = viewModelScope,
@@ -32,7 +33,6 @@ class RouteDetailViewModel @Inject constructor(
             initialValue = null
         )
 
-    // Estado para notificar a la UI del resultado de la exportación (Snackbar / Toast)
     private val _exportMessage = MutableStateFlow<String?>(null)
     val exportMessage: StateFlow<String?> = _exportMessage.asStateFlow()
 
@@ -42,17 +42,20 @@ class RouteDetailViewModel @Inject constructor(
                 routeId = routeId,
                 latitude = latitude,
                 longitude = longitude,
-                title = title,
-                description = description,
+                title = title.trim(),
+                description = description.trim(),
                 imageUri = imageUri
             )
             addPoiUseCase(poi)
         }
     }
 
-    /**
-     * Orquesta la exportación de la ruta a formato GPX escribiendo en el flujo del archivo SAF.
-     */
+    fun deletePoi(poiId: Long) {
+        viewModelScope.launch(Dispatchers.IO) {
+            deletePoiUseCase(poiId)
+        }
+    }
+
     fun exportRouteToGpx(outputStream: OutputStream) {
         val currentRoute = routeDetails.value
         if (currentRoute == null) {

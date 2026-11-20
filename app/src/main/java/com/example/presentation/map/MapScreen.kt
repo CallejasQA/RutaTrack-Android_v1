@@ -23,14 +23,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.AddLocationAlt
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -39,6 +43,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +59,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.di.AppViewModelProvider
+import com.example.domain.model.Poi
+import com.example.presentation.detail.components.AddPoiDialog
+import com.example.presentation.detail.components.PoiInspectionDialog
 import com.example.presentation.map.components.BackgroundLocationRationaleDialog
 import com.example.presentation.map.components.BatteryOptimizationBanner
 import com.example.presentation.map.components.SaveRouteDialog
@@ -61,9 +69,11 @@ import com.example.presentation.map.components.hasBackgroundLocationPermission
 import com.example.presentation.map.components.isBatteryOptimizationIgnored
 import com.example.presentation.map.components.requestIgnoreBatteryOptimizations
 import com.example.service.TrackingService
+import kotlinx.coroutines.launch
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
@@ -92,6 +102,14 @@ fun MapScreen(
     var dismissedBatteryBanner by remember { mutableStateOf(false) }
     var showBackgroundLocationDialog by remember { mutableStateOf(false) }
     var hasAskedBackgroundThisSession by remember { mutableStateOf(false) }
+
+    // Estados para gestión de POIs en recorrido activo
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
+    var showAddPoiDialog by remember { mutableStateOf(false) }
+    var pendingPoiGeoPoint by remember { mutableStateOf<GeoPoint?>(null) }
+    var selectedPoiForInspection by remember { mutableStateOf<Poi?>(null) }
+    val activePoiMarkers = remember { mutableListOf<Marker>() }
 
     val livePolylineOverlay = remember {
         Polyline().apply {
@@ -156,6 +174,7 @@ fun MapScreen(
     }
 
     val startActiveTracking: () -> Unit = {
+        viewModel.ensureActiveRouteSession()
         sendCommandToService(context, TrackingService.ACTION_START_OR_RESUME)
         locationOverlayInstance?.apply {
             enableMyLocation()
@@ -202,6 +221,7 @@ fun MapScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             Column(horizontalAlignment = Alignment.End) {
                 // Botón para ir al Historial de Rutas
@@ -214,6 +234,38 @@ fun MapScreen(
                         .testTag("history_button")
                 ) {
                     Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Historial de rutas")
+                }
+
+                // Botón accesible "Agregar POI" visible solo durante una grabación activa
+                if (state.isTracking || state.activeRouteId != null) {
+                    ExtendedFloatingActionButton(
+                        onClick = {
+                            val currentGeo = state.currentPath.lastOrNull()?.let {
+                                GeoPoint(it.latitude, it.longitude)
+                            } ?: locationOverlayInstance?.myLocation
+                                ?: getBestLastKnownLocation(context)?.let {
+                                    GeoPoint(it.latitude, it.longitude)
+                                }
+
+                            if (currentGeo != null) {
+                                pendingPoiGeoPoint = currentGeo
+                                showAddPoiDialog = true
+                            } else {
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("Esperando señal GPS válida para ubicar el POI.")
+                                }
+                            }
+                        },
+                        icon = {
+                            Icon(Icons.Default.AddLocationAlt, contentDescription = null)
+                        },
+                        text = { Text("Agregar POI") },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier
+                            .padding(bottom = 12.dp)
+                            .testTag("add_poi_fab")
+                    )
                 }
 
                 // Botón principal de Iniciar / Detener grabación
@@ -330,6 +382,26 @@ fun MapScreen(
                         livePolylineOverlay.setPoints(emptyList())
                     }
 
+                    // Marcadores de POIs sobre la capa de ruta, siempre por debajo de MyLocationNewOverlay
+                    if (activePoiMarkers.isNotEmpty()) {
+                        mapView.overlays.removeAll(activePoiMarkers.toSet())
+                        activePoiMarkers.clear()
+                    }
+                    state.activePois.forEach { poi ->
+                        val marker = Marker(mapView).apply {
+                            position = GeoPoint(poi.latitude, poi.longitude)
+                            title = poi.title
+                            snippet = poi.description
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                            setOnMarkerClickListener { _, _ ->
+                                selectedPoiForInspection = poi
+                                true
+                            }
+                        }
+                        activePoiMarkers.add(marker)
+                        mapView.overlays.add(marker)
+                    }
+
                     locationOverlayInstance?.let { myLocOverlay ->
                         if (!mapView.overlays.contains(myLocOverlay)) {
                             mapView.overlays.add(myLocOverlay)
@@ -422,6 +494,32 @@ fun MapScreen(
             onDismiss = { viewModel.onToggleSaveDialog(false) },
             onSave = { name -> viewModel.saveCurrentRoute(name) },
             onDiscard = { viewModel.discardCurrentRoute() }
+        )
+    }
+
+    // Modal para crear un POI en la coordenada GPS actual del recorrido activo
+    if (showAddPoiDialog && pendingPoiGeoPoint != null) {
+        AddPoiDialog(
+            onDismiss = { showAddPoiDialog = false },
+            onSave = { title, desc, uri ->
+                viewModel.addPoiToActiveRoute(
+                    latitude = pendingPoiGeoPoint!!.latitude,
+                    longitude = pendingPoiGeoPoint!!.longitude,
+                    title = title,
+                    description = desc,
+                    imageUri = uri
+                )
+                showAddPoiDialog = false
+            }
+        )
+    }
+
+    // Modal para visualizar un POI tocado en el mapa y eliminarlo con confirmación
+    selectedPoiForInspection?.let { poi ->
+        PoiInspectionDialog(
+            poi = poi,
+            onDismiss = { selectedPoiForInspection = null },
+            onDeleteConfirmed = { poiId -> viewModel.deletePoi(poiId) }
         )
     }
 

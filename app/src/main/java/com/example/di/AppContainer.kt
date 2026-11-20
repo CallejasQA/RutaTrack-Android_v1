@@ -3,38 +3,34 @@ package com.example.di
 import android.content.Context
 import androidx.room.Room
 import com.example.data.importer.RouteFileImporter
+import com.example.data.local.dao.PoiDao
 import com.example.data.local.dao.RouteDao
 import com.example.data.local.database.AppDatabase
 import com.example.data.repository.RouteRepositoryImpl
 import com.example.domain.repository.RouteRepository
 import com.example.domain.usecase.AddPoiUseCase
+import com.example.domain.usecase.DeletePoiUseCase
 import com.example.domain.usecase.DeleteRouteUseCase
 import com.example.domain.usecase.ExportRouteToGpxUseCase
 import com.example.domain.usecase.GetAllRoutesUseCase
+import com.example.domain.usecase.GetPoisByRouteIdUseCase
 import com.example.domain.usecase.GetRouteWithPointsUseCase
 import com.example.domain.usecase.ImportRouteUseCase
 import com.example.domain.usecase.SaveRouteUseCase
 
-/**
- * Contenedor de Inyección de Dependencias (DI) a nivel de aplicación.
- *
- * Provee instancias únicas (Singletons) para la base de datos, el repositorio
- * y los Casos de Uso del Dominio.
- */
 interface AppContainer {
     val routeRepository: RouteRepository
     val saveRouteUseCase: SaveRouteUseCase
     val getAllRoutesUseCase: GetAllRoutesUseCase
     val getRouteWithPointsUseCase: GetRouteWithPointsUseCase
     val addPoiUseCase: AddPoiUseCase
+    val getPoisByRouteIdUseCase: GetPoisByRouteIdUseCase
+    val deletePoiUseCase: DeletePoiUseCase
     val deleteRouteUseCase: DeleteRouteUseCase
     val exportRouteToGpxUseCase: ExportRouteToGpxUseCase
     val importRouteUseCase: ImportRouteUseCase
 }
 
-/**
- * Implementación concreta del contenedor de DI.
- */
 class DefaultAppContainer(private val context: Context) : AppContainer {
 
     private val database: AppDatabase by lazy {
@@ -49,12 +45,16 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
         database.routeDao()
     }
 
+    private val poiDao: PoiDao by lazy {
+        database.poiDao()
+    }
+
     private val routeFileImporter: RouteFileImporter by lazy {
         RouteFileImporter()
     }
 
     override val routeRepository: RouteRepository by lazy {
-        RouteRepositoryImpl(routeDao, routeFileImporter)
+        RouteRepositoryImpl(routeDao, poiDao, routeFileImporter)
     }
 
     override val saveRouteUseCase: SaveRouteUseCase by lazy {
@@ -71,6 +71,14 @@ class DefaultAppContainer(private val context: Context) : AppContainer {
 
     override val addPoiUseCase: AddPoiUseCase by lazy {
         AddPoiUseCase(routeRepository)
+    }
+
+    override val getPoisByRouteIdUseCase: GetPoisByRouteIdUseCase by lazy {
+        GetPoisByRouteIdUseCase(routeRepository)
+    }
+
+    override val deletePoiUseCase: DeletePoiUseCase by lazy {
+        DeletePoiUseCase(routeRepository)
     }
 
     override val deleteRouteUseCase: DeleteRouteUseCase by lazy {

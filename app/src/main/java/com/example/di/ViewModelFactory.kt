@@ -9,18 +9,17 @@ import com.example.presentation.detail.RouteDetailViewModel
 import com.example.presentation.history.HistoryViewModel
 import com.example.presentation.map.MapViewModel
 
-/**
- * Fábrica centralizada de ViewModels para Compose.
- *
- * Conecta los Casos de Uso del AppContainer con los ViewModels respectivos
- * mediante inyección por constructor limpia y tipada.
- */
 object AppViewModelProvider {
     val Factory: ViewModelProvider.Factory = viewModelFactory {
         initializer {
             val app = this.application()
             MapViewModel(
-                saveRouteUseCase = app.container.saveRouteUseCase
+                saveRouteUseCase = app.container.saveRouteUseCase,
+                routeRepository = app.container.routeRepository,
+                getPoisByRouteIdUseCase = app.container.getPoisByRouteIdUseCase,
+                addPoiUseCase = app.container.addPoiUseCase,
+                deletePoiUseCase = app.container.deletePoiUseCase,
+                deleteRouteUseCase = app.container.deleteRouteUseCase
             )
         }
         initializer {
@@ -33,9 +32,6 @@ object AppViewModelProvider {
         }
     }
 
-    /**
-     * Provee una fábrica parametrizada con [routeId] para [RouteDetailViewModel].
-     */
     fun provideRouteDetailViewModel(routeId: Long): ViewModelProvider.Factory = viewModelFactory {
         initializer {
             val app = this.application()
@@ -43,14 +39,12 @@ object AppViewModelProvider {
                 routeId = routeId,
                 getRouteWithPointsUseCase = app.container.getRouteWithPointsUseCase,
                 addPoiUseCase = app.container.addPoiUseCase,
+                deletePoiUseCase = app.container.deletePoiUseCase,
                 exportRouteToGpxUseCase = app.container.exportRouteToGpxUseCase
             )
         }
     }
 }
 
-/**
- * Función de extensión para recuperar la instancia tipada de [BaseApplication].
- */
 fun CreationExtras.application(): BaseApplication =
     (this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as BaseApplication)

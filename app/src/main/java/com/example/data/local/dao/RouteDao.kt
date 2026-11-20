@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import com.example.data.local.entity.PoiEntity
 import com.example.data.local.entity.RouteEntity
 import com.example.data.local.entity.RoutePointEntity
@@ -32,8 +33,19 @@ interface RouteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRoute(route: RouteEntity): Long // Devuelve el ID autogenerado
 
+    @Update
+    suspend fun updateRoute(route: RouteEntity) // Actualiza en sitio sin disparar ON DELETE CASCADE
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRoutePoints(points: List<RoutePointEntity>) // Inserción masiva (Batch)
+
+    @Transaction
+    suspend fun finalizeRouteWithPoints(route: RouteEntity, points: List<RoutePointEntity>) {
+        updateRoute(route)
+        if (points.isNotEmpty()) {
+            insertRoutePoints(points.map { it.copy(routeId = route.id) })
+        }
+    }
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPoi(poi: PoiEntity): Long

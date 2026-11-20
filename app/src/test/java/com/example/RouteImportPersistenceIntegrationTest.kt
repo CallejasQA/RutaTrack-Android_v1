@@ -39,7 +39,7 @@ class RouteImportPersistenceIntegrationTest {
         database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        repository = RouteRepositoryImpl(database.routeDao(), RouteFileImporter())
+        repository = RouteRepositoryImpl(database.routeDao(), database.poiDao(), RouteFileImporter())
         importUseCase = ImportRouteUseCase(repository)
         exportUseCase = ExportRouteToGpxUseCase()
     }

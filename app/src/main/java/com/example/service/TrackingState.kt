@@ -14,6 +14,9 @@ object TrackingState {
     private val _isTracking = MutableStateFlow(false)
     val isTracking: StateFlow<Boolean> = _isTracking.asStateFlow()
 
+    private val _activeRouteId = MutableStateFlow<Long?>(null)
+    val activeRouteId: StateFlow<Long?> = _activeRouteId.asStateFlow()
+
     private val _routePoints = MutableStateFlow<List<RoutePoint>>(emptyList())
     val routePoints: StateFlow<List<RoutePoint>> = _routePoints.asStateFlow()
 
@@ -25,6 +28,10 @@ object TrackingState {
         if (tracking && _startTimeMillis.value == 0L) {
             _startTimeMillis.value = System.currentTimeMillis()
         }
+    }
+
+    fun setActiveRouteId(routeId: Long?) {
+        _activeRouteId.value = routeId
     }
 
     fun addPoint(point: RoutePoint) {
@@ -42,6 +49,7 @@ object TrackingState {
 
     fun clearState() {
         _isTracking.value = false
+        _activeRouteId.value = null
         _routePoints.value = emptyList()
         _startTimeMillis.value = 0L
     }

@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,22 +39,20 @@ fun AddPoiDialog(
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var imageUri by remember { mutableStateOf<Uri?>(null) }
-    
+
     val context = LocalContext.current
 
-    // Selector de fotos nativo y seguro (Zero-permission Photo Picker)
+    // Selector de fotos nativo sin permisos (Zero-permission Photo Picker)
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         uri?.let {
-            try {
-                // Tomamos permiso persistente para conservar acceso a la foto
+            // Regla crítica: persistir el permiso de lectura de URI para futuras sesiones
+            runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     it,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
-            } catch (_: SecurityException) {
-                // Algunos proveedores ya conceden acceso directo sin permiso persistente
             }
             imageUri = it
         }
@@ -72,7 +72,7 @@ fun AddPoiDialog(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Título *") },
-                    placeholder = { Text("Ej. Mirador Panorámico") },
+                    placeholder = { Text("Ej. Mirador, Cruce río") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("poi_title_input"),
@@ -82,7 +82,7 @@ fun AddPoiDialog(
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it },
-                    label = { Text("Descripción (opcional)") },
+                    label = { Text("Descripción / Nota (opcional)") },
                     placeholder = { Text("Ej. Excelente vista para descansar") },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -90,9 +90,8 @@ fun AddPoiDialog(
                     maxLines = 3
                 )
                 Spacer(modifier = Modifier.height(14.dp))
-                
-                // Botón para seleccionar foto
-                Button(
+
+                OutlinedButton(
                     onClick = {
                         photoPickerLauncher.launch(
                             PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -100,12 +99,12 @@ fun AddPoiDialog(
                     },
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 48.dp)
                         .testTag("pick_photo_button")
                 ) {
-                    Text(if (imageUri == null) "📷 Añadir Foto de Galería" else "✓ Foto Seleccionada")
+                    Text(if (imageUri == null) "Adjuntar foto" else "✓ Foto adjuntada (cambiar)")
                 }
 
-                // Vista previa de la foto seleccionada
                 imageUri?.let { uri ->
                     Spacer(modifier = Modifier.height(10.dp))
                     AsyncImage(
@@ -124,7 +123,9 @@ fun AddPoiDialog(
             Button(
                 onClick = { onSave(title, description, imageUri?.toString()) },
                 enabled = title.isNotBlank(),
-                modifier = Modifier.testTag("save_poi_confirm_button")
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("save_poi_confirm_button")
             ) {
                 Text("Guardar POI")
             }
@@ -132,7 +133,9 @@ fun AddPoiDialog(
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
-                modifier = Modifier.testTag("cancel_poi_button")
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag("cancel_poi_button")
             ) {
                 Text("Cancelar")
             }

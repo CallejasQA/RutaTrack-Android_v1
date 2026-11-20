@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -31,7 +30,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -43,10 +41,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -56,11 +52,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import coil.compose.AsyncImage
 import com.example.di.AppViewModelProvider
 import com.example.domain.model.Poi
 import com.example.presentation.detail.components.AddPoiDialog
 import com.example.presentation.detail.components.ElevationGraph
+import com.example.presentation.detail.components.PoiInspectionDialog
+import com.example.presentation.detail.components.RoutePoisListCard
 import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -229,12 +226,26 @@ fun RouteDetailScreen(
                         .testTag("detail_map_view")
                 )
 
-                // Panel inferior flotante: Perfil de elevación, botón de exportación GPX y recordatorio didáctico
+                // Panel inferior flotante: Lista de POIs, Perfil de elevación, Exportar GPX y recordatorio
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
+                    if (routeDetails.pois.isNotEmpty()) {
+                        RoutePoisListCard(
+                            pois = routeDetails.pois,
+                            onPoiClick = { poi ->
+                                mapViewInstance?.controller?.animateTo(
+                                    GeoPoint(poi.latitude, poi.longitude)
+                                )
+                                selectedPoiForInspection = poi
+                            },
+                            onDeletePoi = { poiId -> viewModel.deletePoi(poiId) }
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     // Gráfica de perfil altimétrico en Canvas nativo
                     ElevationGraph(points = routeDetails.points)
 
@@ -306,49 +317,12 @@ fun RouteDetailScreen(
         )
     }
 
-    // Diálogo para inspeccionar un POI existente y ver su fotografía local
+    // Diálogo para inspeccionar un POI existente, ver su foto y eliminarlo con confirmación
     selectedPoiForInspection?.let { poi ->
-        AlertDialog(
-            onDismissRequest = { selectedPoiForInspection = null },
-            title = {
-                Text(
-                    text = poi.title,
-                    style = MaterialTheme.typography.titleLarge
-                )
-            },
-            text = {
-                Column {
-                    if (poi.description.isNotBlank()) {
-                        Text(
-                            text = poi.description,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-                    if (!poi.imageUri.isNullOrBlank()) {
-                        AsyncImage(
-                            model = poi.imageUri,
-                            contentDescription = poi.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                        )
-                    } else {
-                        Text(
-                            text = "Sin fotografía adjunta.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { selectedPoiForInspection = null }) {
-                    Text("Cerrar")
-                }
-            }
+        PoiInspectionDialog(
+            poi = poi,
+            onDismiss = { selectedPoiForInspection = null },
+            onDeleteConfirmed = { poiId -> viewModel.deletePoi(poiId) }
         )
     }
 
